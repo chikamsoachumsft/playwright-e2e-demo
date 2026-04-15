@@ -1,0 +1,73 @@
+# Azure DevOps Pipeline for Playwright
+# Equivalent of the GitHub Actions pipeline for ADO customers
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - '*.md'
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '20'
+
+stages:
+  - stage: E2E
+    displayName: 'E2E Tests'
+    jobs:
+      - job: PlaywrightTests
+        displayName: 'Run Playwright Tests'
+        strategy:
+          matrix:
+            Shard1:
+              SHARD: '1/4'
+            Shard2:
+              SHARD: '2/4'
+            Shard3:
+              SHARD: '3/4'
+            Shard4:
+              SHARD: '4/4'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(nodeVersion)
+            displayName: 'Use Node.js $(nodeVersion)'
+
+          - script: npm ci
+            displayName: 'Install dependencies'
+
+          - script: npx playwright install --with-deps
+            displayName: 'Install Playwright browsers'
+
+          - script: npx playwright test --shard=$(SHARD) --reporter=list,junit
+            displayName: 'Run tests (shard $(SHARD))'
+            env:
+              CI: 'true'
+              BASE_URL: $(STAGING_URL)
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'results.xml'
+              testRunTitle: 'Playwright - Shard $(SHARD)'
+            displayName: 'Publish test results'
+
+          - publish: playwright-report
+            artifact: 'playwright-report-$(System.JobPositionInPhase)'
+            condition: succeededOrFailed()
+            displayName: 'Publish HTML report'
+
+          - publish: test-results
+            artifact: 'test-results-$(System.JobPositionInPhase)'
+            condition: failed()
+            displayName: 'Publish traces on failure'

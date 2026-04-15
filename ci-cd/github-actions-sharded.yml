@@ -1,0 +1,110 @@
+# Enterprise Sharded Playwright Pipeline
+# Distributes tests across N runners for max parallelism
+# Uses official Playwright Docker image (browsers pre-installed)
+
+name: E2E Tests (Sharded)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Run nightly for regression
+  schedule:
+    - cron: '0 2 * * 1-5'  # 2 AM UTC, weekdays
+
+env:
+  TOTAL_SHARDS: 4
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.50.0-jammy
+    strategy:
+      fail-fast: false  # Don't cancel other shards if one fails
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Playwright tests (shard ${{ matrix.shard }}/${{ env.TOTAL_SHARDS }})
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ env.TOTAL_SHARDS }}
+        env:
+          # Pass env vars for test config
+          BASE_URL: ${{ vars.STAGING_URL || 'http://localhost:3000' }}
+          CI: true
+
+      - name: Upload shard report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload blob report (for merging)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report/
+          retention-days: 1
+
+  # Merge all shard reports into a single HTML report
+  merge-reports:
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download all blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-merged
+          path: playwright-report/
+          retention-days: 30
+
+  # Optional: notify on failure
+  notify:
+    if: failure()
+    needs: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify team
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "E2E tests failed on ${{ github.ref_name }}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
