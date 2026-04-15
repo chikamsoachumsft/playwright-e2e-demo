@@ -41,7 +41,7 @@ jobs:
 
       - name: Run Playwright tests
         id: tests
-        run: npx playwright test --project=chromium --reporter=json --output-file=results.json 2>&1 || true
+        run: PLAYWRIGHT_JSON_OUTPUT_NAME=results.json npx playwright test --project=chromium --reporter=json,list 2>&1 || true
         continue-on-error: true
 
       # Generate a markdown summary with test results
