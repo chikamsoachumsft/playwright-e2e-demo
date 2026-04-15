@@ -23,7 +23,7 @@ export default defineConfig({
   // Shared settings for all projects
   use: {
     // Base URL for relative navigations
-    baseURL: process.env.BASE_URL || 'https://demo.playwright.dev/todomvc',
+    baseURL: process.env.BASE_URL || 'https://todomvc.com/examples/react/dist/',
 
     // Collect trace on first retry (great for debugging CI failures)
     trace: 'on-first-retry',
